@@ -1,4 +1,4 @@
-# Sure-tuned_BridgeRegression
+# Sure-tuned bridge regression
 **"SURE-tuned bridge regression" Authors: Jorge Loría, Anindya Bhadra.** 
 Preprint: []()
 # include the link to the preprint
