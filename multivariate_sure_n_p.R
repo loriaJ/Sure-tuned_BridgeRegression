@@ -2,7 +2,7 @@ source('t_alpha_beta_simulation.R')
 
 
 ## for the case of n < p:
-t_moments_p_n <- function(y,nu0,xlambd_xt,sigma_mat){
+t_moments_p_n <- function(y,nu0,xlambd_xt,sigma2){
   n_samp <- dim(xlambd_xt)[1]
   n <- length(y)
   expectations <- matrix(NA,nrow = n,ncol = n_samp)
@@ -16,14 +16,17 @@ t_moments_p_n <- function(y,nu0,xlambd_xt,sigma_mat){
   
   for(i in 1:n_samp){
     A <- nu0 * xlambd_xt[i,,]
-    premp <- (chol(A + sigma_mat))
+    premp <- A
+    diag(premp) <- diag(premp) + sigma2
+    premp <- chol(premp)
+    # premp <- (chol(A + sigma_mat))
     det_1[i] <- sum(log(diag(premp)))
     
     premp <- chol2inv(premp)
     prempy <- premp %*% y
     expectations[,i] <- A %*% prempy 
     variances[,,i] <- 
-      sigma_mat %*% premp %*% A
+      sigma2 * premp %*% A
     p_i[i] <- 0.5*t(y)%*% prempy
     
     variances[,,i] <- variances[,,i] + expectations[,i] %*% t(expectations[,i])
@@ -32,12 +35,19 @@ t_moments_p_n <- function(y,nu0,xlambd_xt,sigma_mat){
   s0 <- - p_i - det_1
   s1 <- sum(exp(s0-max(s0,na.rm = T)))
   # s2 <- sum(exp(-s0+max(s0,na.rm = T)))
+  # print(dim(expectations))
   xbeta_estim <- expectations %*% exp(s0-max(s0,na.rm = T))/s1
   variances <- apply(variances,MARGIN = c(1,2),`%*%`,exp(s0-max(s0,na.rm = T)))/s1
-  variances <- variances - xbeta_estim %*% t(xbeta_estim)
+  # print(dim(xbeta_estim))
+  # variances0 <- variances - xbeta_estim %*% t(xbeta_estim)
+  # print(c(sum(diag(variances0)),
+  #         sum(diag(variances)) - sum(xbeta_estim^2) ))
+  #print()
+  #variances2 <- sum(xbeta_estim^2)
   
   return(list(xbeta_estim = xbeta_estim,
               variance = variances,
+              var2 = sum(xbeta_estim^2),
               post_prob = s1))
 }
 
@@ -54,9 +64,9 @@ t_moments_p_n_mod <- function(y,nu0,sigma_mat,x,n_sim=1000,alpha=0.3){
     samp <- replicate(rt_alpha_beta(n = 1,
                                     alpha = alpha/2,
                                     beta0 = 0.5),n = p)
-    samp <- diag(1/samp)
+    # samp <- diag(1/samp)
     lambda_t[j,,] <- samp
-    lambda_tx[j,,] <- samp %*% t(x)
+    lambda_tx[j,,] <- (1/samp) * t(x)
     xlambd_xt[j,,] <- x %*% lambda_tx[j,,]
     
   }
@@ -97,13 +107,13 @@ t_moments_p_n_mod <- function(y,nu0,sigma_mat,x,n_sim=1000,alpha=0.3){
 }
 
 
-compute_betas <- function(xlambd_xt,lambda_tx,sigma_mat,nu0,y){
+compute_betas <- function(xlambd_xt,lambda_tx,sigma2,nu0,y){
   dims <- dim(lambda_tx)
   nchains <- dims[1]
   nsim <- dims[2]
   p <- dims[3]
   n <- dims[4]
-  sigma_inv <- solve(sigma_mat)
+  # sigma_inv <- solve(sigma_mat)
   p_i <- rep(NA,nsim)
   det_1 <- rep(NA,nsim)
   exp_1 <- matrix(NA,ncol = nsim,nrow = p)
@@ -111,7 +121,8 @@ compute_betas <- function(xlambd_xt,lambda_tx,sigma_mat,nu0,y){
   beta_estim <- matrix(NA,nrow = nchains,ncol = p)
   for(ch in 1:nchains){
     for(i in 1:nsim){
-      v_t_nu <- xlambd_xt[ch,i,,] + 1/nu0 * sigma_mat
+      v_t_nu <- xlambd_xt[ch,i,,]
+      diag(v_t_nu) <- diag(v_t_nu)  + 1/nu0 * sigma2
       cxtx <- chol(v_t_nu)
       inv_cxtx <- chol2inv(cxtx)
       inv_cxtxy <- inv_cxtx %*% y
@@ -149,25 +160,27 @@ t_multivariate_sure_schains_n_p <- function(alpha,x,y,n_sim=10000,
       samp <- replicate(rt_alpha_beta(n = 1,
                                       alpha = alpha/2,
                                       beta0 = 0.5),n = p)
-      samp <- diag(1/samp)
-      lambda_tx[ch,j,,] <- samp %*% t(x)
+      # samp <- diag(1/samp)
+      lambda_tx[ch,j,,] <- (1/samp) * t(x)
       xlambd_xt[ch,j,,] <- x %*% lambda_tx[ch,j,,]
     }
   }
   
   
-  sigma_mat <- diag(sigma2,n)
+  # sigma_mat <- diag(sigma2,n)
   sure_f <- function(nu0,just_sure = TRUE){
     xbeta_mat <- matrix(data = NA,nrow = nchains,ncol = n)
     xbeta_var <- array(data = NA,dim = c(nchains,n,n))
+    var2 <- rep(NA,nchains)
     m_i <- list()
     post_probs <- rep(NA,nchains)
     for(i in 1:nchains){
       m_i[[i]] <- t_moments_p_n(y = y,nu0 = nu0,
                                 xlambd_xt = xlambd_xt[i,,,],
-                                sigma_mat = sigma_mat)
+                                sigma2 = sigma2)
       xbeta_mat[i,] <- m_i[[i]]$xbeta_estim
       xbeta_var[i,,] <- m_i[[i]]$variance
+      var2[i] <- m_i[[i]]$var2
       post_probs[i] <- m_i[[i]]$post_prob 
     }
     xbeta_gr <- colMeans(xbeta_mat)
@@ -177,7 +190,7 @@ t_multivariate_sure_schains_n_p <- function(alpha,x,y,n_sim=10000,
     } else{
       var_xbeta <- 0
     }
-    sure <- sum((y - xbeta_gr)^2) + 2*sum(diag(xbeta_var_gr)) + 2*var_xbeta
+    sure <- sum((y - xbeta_gr)^2) + 2*(sum(diag(xbeta_var_gr)) - mean(var2)) + 2*var_xbeta
     if(just_sure){
       print(c(nu0,sure ))
       return(sure)
@@ -207,19 +220,19 @@ t_multivariate_sure_schains_n_p <- function(alpha,x,y,n_sim=10000,
   opt0 <- optimise(function(log_nu)sure_f(exp(log_nu)),
                    interval = log(nu_vect[c(n0_inf,n0_sup)]))
   
-  optim_sol <- sure_f(nu0=exp(opt0$minimum),
-                      just_sure = FALSE)
+  # optim_sol <- sure_f(nu0=exp(opt0$minimum),
+  #                     just_sure = FALSE)
   beta_estim <- compute_betas(xlambd_xt = xlambd_xt,
                               lambda_tx = lambda_tx,
-                              sigma_mat = sigma_mat,
+                              sigma2 = sigma2,
                               nu0 = exp(opt0$minimum),y = y)
   
   estims <- list(
     nu = exp(opt0$minimum),
     sure = (opt0$objective),
     beta_estim = beta_estim,
-    sure_decomp = optim_sol$sure_decomp,
-    mse_opt = mean((y-optim_sol$xbeta_estim)^2),
+    # sure_decomp = optim_sol$sure_decomp,
+    # mse_opt = mean((y-optim_sol$xbeta_estim)^2),
     mse_beta = mean((y- x %*% beta_estim$beta_mean)^2)
   )
   return(estims)
